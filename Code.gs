@@ -1,114 +1,64 @@
 /**
- * retrieves the filtering data to be used when examaning emails
+ * Replaces any known keyword with the corresponding meta data equivalent
  *
- * @param {string} the directory that the settings are stored in.
- * @return {object} an object of all the filtering data.
+ * @param {string} the input string to parse for keywords
+ * @param {object} the dictionary of fields to insert
+ * @return {string} the resulting output string
  */
-function get(name) {
-  var dirs = DriveApp.getFoldersByName(name);
-  var result = [];
-  while (dirs.hasNext()) {
-    var dir = dirs.next();
-    logger = new MyLogger.create(dir.getName());
-    var files = dir.searchFiles("title contains '.json'");
-    while (files.hasNext()) {
-      var file = files.next();
-      var name = file.getName().replace(".json", "");
-      var blob = file.getBlob();
-      var content = blob.getDataAsString();
-      var today = new Date();
-      var date = today.getFullYear()+'-'+(today.getMonth()+1)+'-'+today.getDate();
-      var time = today.getHours()+':'+today.getMinutes()+':'+today.getSeconds();
-      logger.add("\nFrom " + file.getName() + " processed @ " + date + ' ' + time);
-      var filters = processFilters_(content, logger);
-      for (var i in filters) {
-        var filter = filters[i];
-        filter["src"] = file.getName();
-        filter["name"] = name;
-        logger.add("  * " + stringify(filter, 0));
-        result.push(filter);
-      }
-    }
-    
-    var logFile = dir.getName() + ".log";
-    files = dir.getFilesByName(logFile);
-    if (files.hasNext()) {
-      dir.removeFile(files.next());
-    }
-    dir.createFile(logFile, logger.log + "\n\nFull Set\n" + stringify(result, 4));
+function expandWithData(input, info) {
+  return input.replace(/\#\{(\w+)\}/g, function(tag, name, offset, string) {
+    return (name in info) ? info[name] : tag;
+  });
+}
+
+/**
+ * Replaces any known keyword with the corresponding meta data equivalent
+ *
+ * @param {string} the input string to parse for keywords
+ * @return {string} the resulting output string
+ */
+function expand(input) {
+  return expandWithData(input, data());
+}
+
+/**
+ * Retrives and/or derives the information for the current user
+ *
+ * @return {object} an object containing all the info for the current user
+ */
+function data() {
+  var config = LoadJSON.loadByPath("config");
+  var info = (config && "user" in config) ? config["user"] : {}
+  if (!("email" in info)) {
+    info["email"] = Session.getActiveUser().getEmail();
+  }
+  var comp = info["email"].split('@');
+  if (!("domain" in info)) {
+    info["domain"] = comp[1];
   }
   
-  return result;
-}
-
-/**
- * processes each JSON filter for meta data and convert to 
- * regular expressions.
- *
- * @param {string} the content to parse
- * @param {object} the logger to store data
- * @return {object} the parsed data.
- */
-function processFilters_(content, logger) {
-  var filters = JSON.parse(content);
-  for(var i in filters) {
-    info = filters[i];
-    if ("patterns" in info) {
-      patterns = info["patterns"];
-      for(type in patterns) {
-        var pattern = patterns[type];
-        if (typeof pattern === 'string') {
-          patterns[type] = new RegExp(MetaData.expand(pattern));
-        } else if (Array.isArray(pattern)) {
-          if (pattern.length == 1) {
-            patterns[type] = new RegExp(MetaData.expand(pattern[0]));
-          } else if (pattern.length == 2) {
-            patterns[type] = new RegExp(MetaData.expand(pattern[0]), pattern[1]);
-          }
-        }
-      }
-    }
+  var identity = comp[0];
+  if (!("name" in info)) {
+    info["name"] = identity.replace('.',' ').replace(/\w+/g, function(x) {
+      return x.replace(/^\w/, function(y) {
+        return y.toUpperCase();
+      });
+    });
   }
   
-  return filters;
-}
-
-/**
- * adds the ability of a number to pad iself into a string.
- *
- * @param {integer} the number of desired digits 
- * @return {string} a string representing the value with padded zeros
- */
-Number.prototype.pad = function(size) {
-  var s = String(this);
-  while (s.length < (size || 2)) { s = "0" + s;}
-  return s;
-}
-
-/**
- * determines the timestamp of just now
- * 
- * @return {string} a string representing the timestamp
- */
-function timestamp() {
-  var today = new Date();
-  var date = today.getFullYear()+'-'+(today.getMonth()+1)+'-'+today.getDate();
-  var time = today.getHours().pad(2)+':'+today.getMinutes().pad(2)+':'+today.getSeconds().pad(2);
-  return date+' '+time;
-}
-
-/**
-* stringify a JSON object that has regular expressions
-*
-* @param {object} the object data
-* @param {integer} the indenation amount for formatting
-* @return {string} the resulting string
-*/
-function stringify(object, indent) {
-  return JSON.stringify(object, function(key, value) {
-      if (value instanceof RegExp) {
-        return value.toString();
-      }
-      return value;
-    }, indent);
+  var names = info["name"].split(/ /);
+  if (!("fname" in info)) {
+    info["fname"] = names[0];
+  }
+  
+  if (!("surname" in info)) {
+    info["surname"] = names[names.length-1];
+  }
+  
+  if (!("userid" in info)) {
+    info["userid"] = identity.replace(/^(\w)\w*\./, '$1').substring(0,8);
+  }
+  
+  info["uemail"] = info["userid"] + '@' + info["domain"];
+  return info;
 }
